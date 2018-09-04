@@ -1,0 +1,360 @@
+#+OPTIONS:   broken-links:mark
+#+OPTIONS: toc:nil num:3 H:4 ^:nil pri:t title:nil  html-style:nil
+#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="org.css"/>
+* README                                                           :noexport:
+Run the code inside the code block.
+
+Run M-x org-export-head or (org-export-head directory backend)
+* Code                                                             :noexport: 
+#+BEGIN_SRC emacs-lisp   
+
+;; based on http://pragmaticemacs.com/emacs/export-org-mode-headlines-to-separate-files/
+;; export headlines to separate files
+;; http://emacs.stackexchange.com/questions/2259/how-to-export-top-level-headings-of-org-mode-buffer-to-separate-files
+
+(defun org-export-head--create-temp-buffer-copy-content()
+  (interactive)
+  (let ((temp-buffer (generate-new-buffer "temp")))
+      (copy-to-buffer temp-buffer (point-min) (point-max)) 
+))
+
+(defun org-export-head--run-on-temp-copy-buffer (function-to-run &rest args)
+  (save-excursion
+    (let ((temp-buffer (generate-new-buffer "temp")))
+      (copy-to-buffer temp-buffer (point-min) (point-max)) 
+      (with-current-buffer temp-buffer (org-mode) (outline-show-all) (apply function-to-run args))
+      (kill-buffer temp-buffer)
+      )))
+
+(defun org-export-head (&optional directory-name backend)
+  (interactive)
+  (let ((directory-name (or directory-name (read-directory-name "Directory:")))
+        (backend (or backend "html")))
+    (make-directory directory-name t)
+    (org-export-head--run-on-temp-copy-buffer #'org-export-head--modify-buffer-ast directory-name backend)))
+
+
+(defun org-export-head--modify-buffer-ast (directory-path backend)
+  "Export all subtrees that are *not* tagged with :noexport: to
+separate files.
+
+Subtrees that do not have the :EXPORT_FILE_NAME: property set
+are exported to a filename derived from the headline text."
+  
+  ;;Get the parser tree and the headlines that will become files
+  (let*  ((ast (org-element-parse-buffer))
+          (headlines (org-export-head--get-headlines-ast ast)))
+    
+    
+    ;;Get the templates
+    (let ((header (org-export-head--get-content-subtree-match-tag-ast "header" ast))
+          (index (org-export-head--get-index headlines)))
+      
+      ;;For each not noexport headline apply the template, i.e. copy contents
+      (org-export-head--run-on-match-headline-ast 
+       #'(lambda (headline) 
+           (org-export-head--insert-on-headline-footer-ast headline index))
+       '("index") ast)
+
+      (org-export-head--run-on-not-match-headline-ast 
+       #'(lambda (headline) 
+           (org-export-head--insert-on-headline-header-ast headline header))
+       '("noexport" "noheader") ast)
+      
+      ;;Fix links -- order is important. First external than fuzzy links
+                                        ; (org-export-head--fix-links-ast headlines ast)
+      (org-element-map ast 'link
+        (lambda (link)
+          (let* ((link (or (org-export-head--fix-file-external-link-ast directory-path link) link))
+                 (link (or (org-export-head--fix-local-link-ast headlines link) link))
+                 ))
+          ())))
+
+      ;;Convert the buffer to contain the new AST, 
+      ;;this is needed because the exporter expects the content to be in a buffer
+      (erase-buffer) 
+     (insert (org-element-interpret-data ast))
+      (outline-show-all)
+      
+      ;;Finally export all the headers
+      (org-export-head-export-headers directory-path backend)))
+
+
+;;Not everything can be done using the AST, sadly.
+(defun org-export-head--run-on-each-heading(fn match  &rest args)
+  (save-excursion
+      (goto-char (point-min))
+      (goto-char (re-search-forward "^*"))
+      (set-mark (line-beginning-position))
+      (goto-char (point-max))
+      (org-map-entries
+       (lambda ()
+         (apply fn args)
+         )
+       match 'region-start-level)))
+
+(defun org-export-head-export-headers (directory-name backend)
+  (if (equal backend "html")
+      (org-export-head--run-on-each-heading 
+       #'(lambda ()
+           (org-set-property
+            "EXPORT_FILE_NAME"
+            (concat directory-name (org-export-head--escaped-headline)))
+           (deactivate-mark)
+           (org-html-export-to-html nil t)
+           (set-buffer-modified-p t)) "-noexport"))
+  (if (equal backend "pdf")
+      (org-export-head--run-on-each-heading 
+       #'(lambda ()
+           (org-set-property
+            "EXPORT_FILE_NAME"
+            (concat directory-name (org-export-head--escaped-headline)))
+           (deactivate-mark)
+           (org-latex-export-to-pdf nil t)
+           (set-buffer-modified-p t)) "-noexport")))
+
+
+(defun org-export-head--fix-links-ast (headlines ast)
+    (org-element-map ast 'link
+      (lambda (link)
+        (when (and (string= (org-element-property :type link) "fuzzy")
+                   (in-set-p (org-element-property :path link) headlines)) 
+          (let ((path  (org-element-property :path link)))
+                (if (in-set-p path headlines)
+                    (let ((link-copy (org-element-copy link)))
+                      (org-element-put-property link-copy :type "file")
+                      (org-element-put-property link-copy :path (concat (org-export-head--escape path) ".org"))
+                      (org-element-set-element link  link-copy))))))))
+
+
+(defun org-export-head--fix-local-link-ast (headlines link)
+  (flet ((get-hash (element set)
+                   (gethash element set nil)))
+    (when (string= (org-element-property :type link) "fuzzy")
+      (let* ((path  (org-element-property :path link))
+             (new-path (get-hash path headlines))) 
+             (when new-path
+               (let ((link-copy (org-element-copy link)))
+                 (apply #'org-element-adopt-elements link-copy (org-element-contents link))
+                 (org-element-put-property link-copy :type "file")
+                 (org-element-put-property link-copy :path (concat (org-export-head--escape path) ".org"))
+                 (org-element-set-element link link-copy)))))))
+
+
+(defun org-export-head--fix-file-external-link-ast (directory-path link)
+  (when (string= (org-element-property :type link) "file")
+    (let* ((path (org-element-property :path link))
+           (link-copy (org-element-copy link))
+           ;;Removes ../ from the releative path of the file to force it to be moved to a subfolder
+           ;;of the current dir. This causes some file conflits in edge cases
+           ;;e.g: ../images and ../../images will map to the same place. This should be rare in normal usage
+           (new-relative-path 
+            (replace-regexp-in-string "\\.\\./" "" (file-relative-name path)))
+           (new-hard-link-path (concat directory-path new-relative-path))
+           (new-hard-link-directory (file-name-directory new-hard-link-path)))
+      
+      ;;Fix the AST
+      (apply #'org-element-adopt-elements link-copy (org-element-contents link))
+      (org-element-put-property link-copy :path new-relative-path)
+      (org-element-set-element link  link-copy)
+      
+      ;;Create hard link folder
+      (make-directory new-hard-link-directory t)
+      ;;Create hard link, replacing if it already exists, catching error if file does not exist
+      (condition-case nil
+          (add-name-to-file path new-hard-link-path nil)
+        (error nil))
+      )))
+
+
+;;This is a hack. Create index in a separate buffer headline
+;;The copy the contents of the headline
+(defun org-export-head--get-index (headlines)
+  (save-excursion
+  (let ((temp-buffer (generate-new-buffer "temp"))
+        (contents nil))
+    (with-current-buffer temp-buffer 
+      (org-mode) 
+      (outline-show-all) 
+      (insert "* Pages\n\n") ;; Ignored. Necessary for org-element-contents to work properly.
+      (maphash (lambda(key value) (insert (concat "- [[" key "][" key "]]\n")))  headlines)
+      (setq contents(org-element-contents (car (org-element-contents (org-element-parse-buffer))))))
+    (kill-buffer temp-buffer)
+    contents)))
+
+(defun org-export-head--run-on-not-match-headline-ast (fn not-match ast)
+    (org-element-map ast 'headline
+      (lambda (headline)
+        (unless (cl-intersection not-match (org-element-property :tags headline) :test 'equal) 
+          (when (equal 1 (org-element-property :level headline))
+          (funcall fn headline)
+          )))))
+
+
+(defun org-export-head--run-on-match-headline-ast (fn match ast)
+    (org-element-map ast 'headline
+      (lambda (headline)
+        (when (cl-intersection match (org-element-property :tags headline) :test 'equal)
+          (when (equal 1 (org-element-property :level headline))
+            (funcall fn headline)
+          )))))
+
+  
+(defun org-export-head--get-headlines-ast (ast)
+  (flet 
+      ((make-hash ()
+                 (make-hash-table :test 'equal))
+       (add-to-hash (headline set)
+                   (puthash headline  (org-export-head--headline-to-file headline) set))
+       )
+    (let ((set (make-hash)))
+        (org-export-head--run-on-not-match-headline-ast
+         #'(lambda (headline) (add-to-hash (org-element-property :raw-value headline) set))
+         '("noexport") ast)
+  set)))
+
+
+(defun org-export-head--insert-on-headline-header-ast (headline contents)
+  (let ((first-child (car (org-element-contents headline))))
+    (if first-child 
+        (dolist (element contents) 
+          (org-element-insert-before element first-child))
+       (apply #'org-element-adopt-elements headline contents))))
+
+;;There is some weird bug with insert on footer. 
+(defun org-export-head--insert-on-headline-footer-ast (headline contents)
+  (apply #'org-element-adopt-elements headline contents))
+
+
+
+(defun org-export-head--escaped-headline ()
+  (org-export-head--escape (org-export-head--headline)))
+
+(defun org-export-head--headline ()
+  (nth 4 (org-heading-components)))
+
+
+(defun org-export-head--escape(text)
+  (replace-regexp-in-string "[\\?.,!]" ""
+   (replace-regexp-in-string "/" "-" 
+    (replace-regexp-in-string " " "_" text))))
+
+(defun org-export-head--headline-to-file(headline)
+   (concat (org-export-head--escape headline) ".org"))
+
+(defun org-export-head--get-content-subtree-match-tag-ast(match ast)
+  (let ((contents nil))
+    (org-element-map ast 'headline
+      (lambda (headline)
+        (when (member match (org-element-property :tags headline))
+          (setq contents   (nconc contents (org-element-contents headline)))))) 
+    contents))
+
+
+
+;;Functions not in use that can be used to easily add more template things.
+(defun org-export-head--insert-content-match-headline-in-not-match-headline-ast(from-match to-not-match headline)
+  (org-export-head--run-on-not-match-headline-ast 
+   #'(lambda (headline) 
+       (org-export-head--insert-on-headline-header-ast 
+        headline
+        (org-export-head--get-content-subtree-match-tag-ast from-match ast)))
+   to-not-match ast))
+
+
+(defun org-export-head--insert-content-match-headline-in-match-headline-ast(from-match to-match headline)
+  (org-export-head--run-on-not-match-headline-ast 
+   #'(lambda (headline) 
+       (org-export-head--insert-on-headline-header-ast 
+        headline
+        (org-export-head--get-content-subtree-match-tag-ast from-match ast)))
+   to-match ast))
+  
+  
+
+#+END_SRC
+
+#+RESULTS:
+: org-export-head--insert-content-match-headline-in-match-headline-ast
+
+
+* Includes :noexport:
+Creates a hard link to org.css in the export directory.
+[[file:./org.css]]
+
+* Menu :noexport:header:
+#+begin_head
+#+begin_title
+[[Index][Ivan @ Home]]
+#+end_title
+#+begin_catch-phrase
+Excelsior!
+#+end_catch-phrase
+
+#+begin_nav
+- [[Index][home]]
+- [[Foo][Foo!!]]
+- [[Foo Bar][Foo Bar!!]]
+- [[Broken][Should say Broken link]]
+#+end_nav
+#+end_head
+
+
+@@html: <h1>@@
+#+BEGIN_SRC emacs-lisp :exports results :results value raw
+(org-element-interpret-data (plist-get (org-export-get-environment nil t) ':title))
+#+END_SRC
+@@html: </h1>@@
+
+#+TOC: headlines 2
+
+* Index :index:
+This is my index! Sadly during export I lose access to all information related to it. 
+
+Anyway:
+** Index is here!
+
+
+
+   
+* Foo
+** subheader 0
+SCHEDULED: <2018-08-31 Fri>
+
+This is an example page that will be generated. 
+
+
+** subheader1
+** Subheader 2
+*** Subheader 2.1
+**** Subheader 2.1.1
+** Subheader 3
+
+   [[Subheader 2.1.1][Internal link!]]
+
+   [[Bar][External Link without space!]]
+
+   [[Foo Bar][External Link with space!]]
+
+
+
+
+#+BEGIN_SRC emacs-lisp 
+[[test]] ;Show that links in code are not affected!
+#+END_SRC
+
+* Bar
+
+Here we show that footnotes work [fn:1].
+
+They are pretty great! [fn:2]
+
+* Foo Bar
+  Nothing to see here
+* Footnotes :noexport:
+
+[fn:2] My second foot note!
+
+[fn:1] How does this work
+
+
