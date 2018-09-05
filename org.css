@@ -1122,24 +1122,24 @@ p.verse{
 }
 
 
-.nav ul {
+nav ul {
     list-style: none;
 }
-.nav li {
+nav li {
     display: inline-block;
 }
-.nav li + li:before {
+nav li + li:before {
     display: inline-block;
     content: "\00B7 \00a0";
     color: #ccc;
 }
 
-.nav ul {
+nav ul {
     padding: 0;
     margin: 0 0 20px;
 }
 
-.nav a {
+nav a {
     /*color: #333;*/
 }
 

@@ -1,5 +1,6 @@
 #+OPTIONS:   broken-links:mark
-#+OPTIONS: toc:nil num:3 H:4 ^:nil pri:t title:nil  html-style:nil
+#+OPTIONS: toc:nil num:3 H:4 ^:nil pri:t title:nil  html-style:nil html5-fancy:t
+#+HTML_DOCTYPE: html5
 #+HTML_HEAD: <link rel="stylesheet" type="text/css" href="org.css"/>
 * README                                                           :noexport:
 Run the code inside the code block.
@@ -20,7 +21,10 @@ The MENU and FOOTNOTES have to be :noexport: It cannot contain a property drawer
   (save-excursion
     (let ((temp-buffer (generate-new-buffer "tmp")))
       (copy-to-buffer temp-buffer (point-min) (point-max)) 
-      (with-current-buffer temp-buffer (org-mode) (outline-show-all) (apply function-to-run args))
+      (with-current-buffer temp-buffer 
+        (org-mode) 
+        (outline-show-all) 
+        (apply function-to-run args))
       (kill-buffer temp-buffer))))
 
 (defun org-export-head (&optional directory-name backend reexport)
@@ -34,7 +38,7 @@ Reexports all headings if reexport is non-nil"
     (org-export-head--run-on-temp-copy-buffer #'org-export-head--modify-buffer-ast directory-name backend reexport)))
 
 
-(defun org-export-head-reexport (&optional directory-name backend reexport)
+(defun org-export-head-reexport (&optional directory-name backend)
   "Reexports all the headings"
   (interactive)
   (org-export-head directory-name backend t))
@@ -45,7 +49,7 @@ separate files.
 
 Subtrees that do not have the :EXPORT_FILE_NAME: property set
 are exported to a filename derived from the headline text."
-  ;; Delete content that has already been exported and set it to non-export
+  ;; Delete content that has already been exported and set it to noreexport
   (if (not reexport)
       (org-export-head--delete-noreexport))
   
@@ -70,7 +74,6 @@ are exported to a filename derived from the headline text."
        '("noexport" "noheader" "noreexport") ast)
       
       ;;Fix links -- order is important. First external than fuzzy links
-                                        ; (org-export-head--fix-links-ast headlines ast)
       (org-element-map ast 'link
         (lambda (link)
           (let* ((link (or (org-export-head--fix-file-external-link-ast directory-path link) link))
@@ -155,6 +158,8 @@ are exported to a filename derived from the headline text."
   "Gets the hash of the subtree at point"
   (md5 (org-export-head--get-content-subtree-at-point)))
 
+
+;;Idea from https://emacs.stackexchange.com/a/39376/20165
 (defun org-export-head--update-hashes()
   "Updates the hashes of all the headings"
   (org-export-head--run-on-each-heading 
@@ -237,7 +242,7 @@ are exported to a filename derived from the headline text."
       
       ;;Create hard link folder
       (make-directory new-hard-link-directory t)
-      ;;Create hard link, replacing if it already exists, catching error if file does not exist
+      ;;Create hard link, not replacing if it already exists, catching error if file does not exist
       (condition-case nil
           (add-name-to-file path new-hard-link-path nil)
         (error nil)))))
@@ -318,10 +323,10 @@ are exported to a filename derived from the headline text."
   (apply #'org-element-adopt-elements headline contents))
 
 (defun org-export-head--escape(text)
-  (replace-regexp-in-string "[\\?.,!]" ""
-                            (replace-regexp-in-string "/" "-" 
-                                                      (replace-regexp-in-string " " "_" text))))
-
+  (let* ((text (replace-regexp-in-string " " "_" text))
+         (text (replace-regexp-in-string "/" "-" text))
+         (text (replace-regexp-in-string "[\\?.,!]" "" text)))
+    text))
 
 (defun org-export-head--get-content-subtree-match-tag-ast(match ast)
   (let ((contents nil))
@@ -425,7 +430,7 @@ This is an example page that will be generated.
 #+END_SRC
 
 * Bar
-
+  
 Here we show that footnotes work [fn:1].
 
 They are pretty great! [fn:2]
