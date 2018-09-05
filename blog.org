@@ -5,6 +5,9 @@
 Run the code inside the code block.
 
 Run M-x org-export-head or (org-export-head directory backend)
+
+The MENU and FOOTNOTES have to be :noexport: It cannot contain a property drawer at the moment.
+
 * Code                                                             :noexport: 
 #+BEGIN_SRC emacs-lisp   
 
@@ -20,26 +23,34 @@ Run M-x org-export-head or (org-export-head directory backend)
 
 (defun org-export-head--run-on-temp-copy-buffer (function-to-run &rest args)
   (save-excursion
-    (let ((temp-buffer (generate-new-buffer "temp")))
+    (let ((temp-buffer (generate-new-buffer "tmp")))
       (copy-to-buffer temp-buffer (point-min) (point-max)) 
       (with-current-buffer temp-buffer (org-mode) (outline-show-all) (apply function-to-run args))
       (kill-buffer temp-buffer)
       )))
 
-(defun org-export-head (&optional directory-name backend)
+(defun org-export-head (&optional directory-name backend reexport)
   (interactive)
   (let ((directory-name (or directory-name (read-directory-name "Directory:")))
         (backend (or backend "html")))
     (make-directory directory-name t)
-    (org-export-head--run-on-temp-copy-buffer #'org-export-head--modify-buffer-ast directory-name backend)))
+    (org-export-head--update-hashes)
+    (org-export-head--run-on-temp-copy-buffer #'org-export-head--modify-buffer-ast directory-name backend reexport)))
 
 
-(defun org-export-head--modify-buffer-ast (directory-path backend)
+(defun org-export-head-reexport (&optional directory-name backend reexport)
+  (interactive)
+  (org-export-head directory-name backend t))
+
+(defun org-export-head--modify-buffer-ast (directory-path backend reexport)
   "Export all subtrees that are *not* tagged with :noexport: to
 separate files.
 
 Subtrees that do not have the :EXPORT_FILE_NAME: property set
 are exported to a filename derived from the headline text."
+  ;; Delete content that has already been exported and set it to non-export
+  (if (not reexport)
+      (org-export-head--delete-noreexport))
   
   ;;Get the parser tree and the headlines that will become files
   (let*  ((ast (org-element-parse-buffer))
@@ -55,11 +66,11 @@ are exported to a filename derived from the headline text."
        #'(lambda (headline) 
            (org-export-head--insert-on-headline-footer-ast headline index))
        '("index") ast)
-
+      
       (org-export-head--run-on-not-match-headline-ast 
        #'(lambda (headline) 
            (org-export-head--insert-on-headline-header-ast headline header))
-       '("noexport" "noheader") ast)
+       '("noexport" "noheader" "noreexport") ast)
       
       ;;Fix links -- order is important. First external than fuzzy links
                                         ; (org-export-head--fix-links-ast headlines ast)
@@ -69,18 +80,19 @@ are exported to a filename derived from the headline text."
                  (link (or (org-export-head--fix-local-link-ast headlines link) link))
                  ))
           ())))
-
-      ;;Convert the buffer to contain the new AST, 
-      ;;this is needed because the exporter expects the content to be in a buffer
-      (erase-buffer) 
-     (insert (org-element-interpret-data ast))
-      (outline-show-all)
-      
-      ;;Finally export all the headers
-      (org-export-head-export-headers directory-path backend)))
+    
+    ;;Convert the buffer to contain the new AST, 
+    ;;this is needed because the exporter expects the content to be in a buffer
+    (erase-buffer) 
+    (insert (org-element-interpret-data ast))
+    (outline-show-all)
+    
+    ;;Finally export all the headers
+    (org-export-head-export-headers directory-path backend)))
 
 
 ;;Not everything can be done using the AST, sadly.
+;;START OF NON AST SESSION
 (defun org-export-head--run-on-each-heading(fn match  &rest args)
   (save-excursion
       (goto-char (point-min))
@@ -91,7 +103,8 @@ are exported to a filename derived from the headline text."
        (lambda ()
          (apply fn args)
          )
-       match 'region-start-level)))
+       match 'region-start-level)
+       (deactivate-mark)))
 
 (defun org-export-head-export-headers (directory-name backend)
   (if (equal backend "html")
@@ -102,7 +115,7 @@ are exported to a filename derived from the headline text."
             (concat directory-name (org-export-head--escaped-headline)))
            (deactivate-mark)
            (org-html-export-to-html nil t)
-           (set-buffer-modified-p t)) "-noexport"))
+           (set-buffer-modified-p t)) "-noexport-noreexport"))
   (if (equal backend "pdf")
       (org-export-head--run-on-each-heading 
        #'(lambda ()
@@ -111,22 +124,70 @@ are exported to a filename derived from the headline text."
             (concat directory-name (org-export-head--escaped-headline)))
            (deactivate-mark)
            (org-latex-export-to-pdf nil t)
-           (set-buffer-modified-p t)) "-noexport")))
+           (set-buffer-modified-p t)) "-noexport-noreexport")))
+
+(defun org-export-head--goto-header(&optional no-new-line)
+  (interactive)
+  (org-back-to-heading t)
+  (let* ((beg-end (org-get-property-block))
+         (end (cdr beg-end)))
+    (goto-char (or end (point))))
+  (goto-char (point-at-bol 2))
+   (if (not no-new-line) 
+    (progn
+      (newline)
+      (goto-char (point-at-bol 0))))
+   (point))
+
+(defun org-export-head--get-content-subtree-at-point()
+  (save-mark-and-excursion
+    (deactivate-mark t)
+    (let ((start (org-export-head--goto-header t))
+          (end (org-end-of-subtree t))) 
+      (buffer-substring start end))))
+
+(defun get-hash-value-content()
+  (md5 (org-export-head--get-content-subtree-at-point)))
+
+(defun org-export-head--update-hashes()
+  (org-export-head--run-on-each-heading 
+   #'(lambda()
+       (let ((new-hash (get-hash-value-content))
+             (old-hash (org-entry-get-with-inheritance "HASH")))
+         (if (not old-hash)
+             (progn
+               (org-set-property "CREATION-DATE" (format-time-string "%Y-%m-%d"))))
+         ;;If there was a change made
+         (if (not (equal new-hash old-hash))
+             (org-set-property "MODIFICATION-DATE" (format-time-string "%Y-%m-%d")))
+         (org-set-property "HASH" new-hash)
+         (org-set-property "PREVIOUS-HASH" (or old-hash ""))))
+   "-noexport"))
 
 
-(defun org-export-head--fix-links-ast (headlines ast)
-    (org-element-map ast 'link
-      (lambda (link)
-        (when (and (string= (org-element-property :type link) "fuzzy")
-                   (in-set-p (org-element-property :path link) headlines)) 
-          (let ((path  (org-element-property :path link)))
-                (if (in-set-p path headlines)
-                    (let ((link-copy (org-element-copy link)))
-                      (org-element-put-property link-copy :type "file")
-                      (org-element-put-property link-copy :path (concat (org-export-head--escape path) ".org"))
-                      (org-element-set-element link  link-copy))))))))
+;;Needs to be in outline show all mode
+(defun org-export-head--delete-noreexport()
+  "Faster export by deleting things that won't be exported so no need to process then"
+  (org-export-head--run-on-each-heading 
+   #'(lambda()
+       (let ((old-hash (org-entry-get-with-inheritance "PREVIOUS-HASH"))
+             (new-hash (org-entry-get-with-inheritance "HASH")))    
+         ;;If there was a change made
+         (if (equal new-hash old-hash)
+             (progn
+               (org-toggle-tag "noreexport" 'on)
+               ;;faster export by deleting noexport things before processing
+               (org-export-head--erase-content-subtree)
+               ))
+         )) "-noexport"))
 
+(defun org-export-head--erase-content-subtree()
+  (save-excursion
+    (let ((start (org-export-head--goto-header t))
+          (end (org-end-of-subtree))) 
+      (delete-region start end))))
 
+;;END OF NON AST SESSION
 (defun org-export-head--fix-local-link-ast (headlines link)
   (flet ((get-hash (element set)
                    (gethash element set nil)))
@@ -214,11 +275,19 @@ are exported to a filename derived from the headline text."
   set)))
 
 
+;;Quite ugly, but necessary to not insert things inside the properties drawer
 (defun org-export-head--insert-on-headline-header-ast (headline contents)
-  (let ((first-child (car (org-element-contents headline))))
-    (if first-child 
-        (dolist (element contents) 
-          (org-element-insert-before element first-child))
+  (let* ((headline-contents (org-element-contents headline))
+         (section-contents  (org-element-contents (car headline-contents)))
+         (next-child (car (cdr headline-contents)))
+         (child (car section-contents)))
+     (while (memq (org-element-type child) '(planning drawer property-drawer))
+       (setq section-contents (cdr section-contents))
+       (setq child (car section-contents)))
+     (setq child (or child next-child))
+     (if child 
+         (dolist (element contents) 
+           (org-element-insert-before element child))
        (apply #'org-element-adopt-elements headline contents))))
 
 ;;There is some weird bug with insert on footer. 
