@@ -34,8 +34,8 @@ Reexports all headings if reexport is non-nil"
   (let ((directory-name (or directory-name (read-directory-name "Directory:")))
         (backend (or backend "html")))
     (make-directory directory-name t)
-    (org-export-head--update-hashes)
-    (org-export-head--run-on-temp-copy-buffer #'org-export-head--modify-buffer-ast directory-name backend reexport)))
+    (org-export-head--run-on-temp-copy-buffer #'org-export-head--modify-buffer-ast directory-name backend reexport)
+    (org-export-head--update-hashes)))
 
 
 (defun org-export-head-reexport (&optional directory-name backend)
@@ -50,6 +50,7 @@ separate files.
 Subtrees that do not have the :EXPORT_FILE_NAME: property set
 are exported to a filename derived from the headline text."
   ;; Delete content that has already been exported and set it to noreexport
+  (org-export-head--update-hashes)
   (if (not reexport)
       (org-export-head--delete-noreexport))
   
@@ -148,7 +149,7 @@ are exported to a filename derived from the headline text."
 
 (defun org-export-head--get-content-subtree-at-point()
   "Gets the content of the subtree at point"
-  (save-mark-and-excursion
+  (save-excursion
     (deactivate-mark t)
     (let ((start (org-export-head--goto-header t))
           (end (org-end-of-subtree t))) 
@@ -156,7 +157,10 @@ are exported to a filename derived from the headline text."
 
 (defun get-hash-value-content()
   "Gets the hash of the subtree at point"
-  (md5 (org-export-head--get-content-subtree-at-point)))
+  (hash-function (org-export-head--get-content-subtree-at-point)))
+
+(defun hash-function (text)
+  (md5 text))
 
 
 ;;Idea from https://emacs.stackexchange.com/a/39376/20165
@@ -164,16 +168,20 @@ are exported to a filename derived from the headline text."
   "Updates the hashes of all the headings"
   (org-export-head--run-on-each-heading 
    #'(lambda()
-       (let ((new-hash (get-hash-value-content))
-             (old-hash (org-entry-get-with-inheritance "HASH")))
+       (let ((new-hash  (format "%s" (get-hash-value-content)))
+             (old-hash (org-entry-get-with-inheritance "HASH"))
+             (older-hash (org-entry-get-with-inheritance "PREVIOUS-HASH"))) 
          (if (not old-hash)
              (progn
                (org-set-property "CREATION-DATE" (format-time-string "%Y-%m-%d"))))
          ;;If there was a change made
          (if (not (equal new-hash old-hash))
-             (org-set-property "MODIFICATION-DATE" (format-time-string "%Y-%m-%d")))
-         (org-set-property "HASH" new-hash)
-         (org-set-property "PREVIOUS-HASH" (or old-hash ""))))
+             (progn
+               (org-set-property "MODIFICATION-DATE" (format-time-string "%Y-%m-%d"))
+               (org-set-property "HASH" new-hash)))
+         ;;Setting property is expensive
+         (if (not (equal old-hash older-hash))
+               (org-set-property "PREVIOUS-HASH" (or old-hash "")))))
    "-noexport"))
 
 (defun org-export-head--delete-noreexport()
@@ -287,10 +295,10 @@ are exported to a filename derived from the headline text."
   (flet ((make-hash ()
                     (make-hash-table :test 'equal))
          (add-to-hash (headline set)
-                      (puthash headline  (org-export-head--headline-to-file headline) set)))
+                      (puthash (org-element-property :raw-value headline)  headline set)))
     (let ((set (make-hash)))
       (org-export-head--run-on-not-match-headline-ast
-       #'(lambda (headline) (add-to-hash (org-element-property :raw-value headline) set))
+       #'(lambda(headline) (add-to-hash headline set))
        '("noexport") ast)
       set)))
 
