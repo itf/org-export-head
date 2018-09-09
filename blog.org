@@ -114,7 +114,9 @@ are exported to a filename derived from the headline text."
 ;;Not everything can be done using the AST, sadly.
 ;;Org element has no support for adding custom properties to headlines
 ;;Nor does it have a nice interface to grab the contents without the property drawer
-;;Ideally everything would be done using the AST and org-element
+;;Ideally everything would be done using the AST and org-element, since it is 
+;;Less prone to writting bugs when using it. 
+;;So right now it is only used for fixing links
 
 ;;START OF NON AST (non org-element) SESSION
 (defun org-export-head--run-on-each-heading(fn match  &rest args)
@@ -204,6 +206,8 @@ are exported to a filename derived from the headline text."
   (org-export-head-hash-function (org-export-head--get-content-subtree-at-point)))
 
 (defun org-export-head-hash-function(text)
+  "Function to calculate the hash of text.
+Can be changed to something such as (length text) to run even faster."
   (md5 text))
 
 ;;;END HASH CODE
@@ -256,6 +260,9 @@ As well as a list of the headline names"
 
 
 (defun org-export-head--replace-headline-macros(macro-alist)
+  "Replace macros of the type ###TEXT### They can contain information such as date
+or previous and next post.
+Any headline property can be used as a macro of this type."
   (save-excursion
     (org-back-to-heading)
     ;;End of subtree might change because of macro expansion, so it is recalculated.
@@ -267,18 +274,10 @@ As well as a list of the headline names"
               (replace-match  macro-subs t t)
             (replace-match "")))))))
 
-(defun org-export-head--generate-macro-plist(headlines-hash headlines-list)
-  (let* ((headline-name (org-export-head--headline))
-         (headline (gethash headline-name headlines-hash nil))
-         (macro-plist ())
-         (macro-plist (lax-plist-put macro-plist "next" (org-element-property :NEXT headline)))
-         (macro-plist (lax-plist-put macro-plist "previous" (org-element-property :PREVIOUS headline)))
-         (macro-plist (lax-plist-put macro-plist "next-url" (org-element-property :NEXT_URL headline)))
-         (macro-plist (lax-plist-put macro-plist "previous-url" (org-element-property :PREVIOUS_URL headline))))
-    macro-plist))
-    
 
 (defun org-export-head--get-content-subtree-match(match)
+  "Get content of the subtree that matches \"match\"  
+Where match is a tag or -tag or combination of them."
   (save-excursion
   (let ((content "")) 
     (org-export-head--run-on-each-heading
@@ -288,11 +287,13 @@ As well as a list of the headline names"
     content)))
 
 (defun org-export-head--insert-on-header (text)
+  "Insert text on the header of the subtree, but after the property box"
   (save-excursion
     (org-export-head--goto-header)
     (insert text)))
 
 (defun org-export-head--generate-index-alist (headlines-list headlines-hash)
+  "Geneates an org list with the index of the website and inserts it in an alist"
   (let ((index "")
         (reverse-index ""))
     (dolist (headline headlines-list)
@@ -343,58 +344,8 @@ As well as a list of the headline names"
         (error nil)))))
 
 
-;;This is a hack. Creates index in a separate buffer headline
-;;Then copy the contents of the headline; 
-;;Ideally it should be done by using org-element-create; but this didnt' work.
-(defun org-export-head--get-index (headlines)
-  "Generates a list of all the exported pages"
-  (save-excursion
-    (let ((temp-buffer (generate-new-buffer "temp"))
-          (contents nil))
-      (with-current-buffer temp-buffer 
-        (org-mode) 
-        (outline-show-all) 
-        (insert "* Pages\n\n") ;; Ignored. Necessary for org-element-contents to work properly.
-        (maphash (lambda(key value) (insert (concat "- [[" key "][" key "]]\n")))  headlines)
-        (setq contents(org-element-contents (car (org-element-contents (org-element-parse-buffer))))))
-      (kill-buffer temp-buffer)
-      contents)))
-
-(defun org-export-head--run-on-not-match-headline-ast (fn not-match ast)
-  "Runs the function on headlines that don't match 'not-match' "
-  (org-element-map ast 'headline
-    (lambda (headline)
-      (unless (cl-intersection not-match (org-element-property :tags headline) :test 'equal) 
-        (when (equal 1 (org-element-property :level headline))
-          (funcall fn headline))))))
-
-
-(defun org-export-head--run-on-match-headline-ast (fn match ast)
-  "Runs the function on headlines that match 'match' "
-  (org-element-map ast 'headline
-    (lambda (headline)
-      (when (cl-intersection match (org-element-property :tags headline) :test 'equal)
-        (when (equal 1 (org-element-property :level headline))
-          (funcall fn headline))))))
-
-
-(defun org-export-head--get-headlines-ast(ast)
-  (flet ((make-hash ()
-                    (make-hash-table :test 'equal))
-         (add-to-hash (headline set)
-                      (puthash (org-element-property :raw-value headline)  headline set)))
-    (let ((headlines-hash (make-hash))
-          (headlines-list '()))
-      (org-export-head--run-on-not-match-headline-ast
-       #'(lambda(headline) 
-           (add-to-hash headline headlines-hash)
-           (setq headlines-list (cons (org-element-property :raw-value headline)  headlines-list)))
-       '("noexsport") ast)
-      (cons headlines-hash headlines-list))))
-
-
-
 (defun org-export-head--insert-next-previous-headline(headlines-hash headlines-list)
+  "Decides what is the next and the previous post and create macro"
   (let* ((temp-list (cons nil headlines-list))
         (len (length headlines-list)))
     (dotimes (i len)
@@ -416,29 +367,6 @@ As well as a list of the headline names"
   (concat (org-export-head--escape headline-name) ".org"))
 
 
-;;Quite ugly, but necessary to not insert things inside the properties drawer
-(defun org-export-head--insert-on-headline-header-ast(headline contents)
-  "Inserts contents after the properties of headline."
-  ;;The only way to find where the properties end is by scanning the tree and knowing
-  ;;That any content inside a headline is inside a "section" element.
-  (let* ((headline-contents (org-element-contents headline))
-         (section-contents  (org-element-contents (car headline-contents)))
-         (next-child (car (cdr headline-contents)))
-         (child (car section-contents)))
-    (while (memq (org-element-type child) '(planning drawer property-drawer))
-      (setq section-contents (cdr section-contents))
-      (setq child (car section-contents)))
-    (setq child (or child next-child))
-    (if child 
-        (dolist (element contents) 
-          (org-element-insert-before element child))
-      (apply #'org-element-adopt-elements headline contents))))
-
-
-(defun org-export-head--insert-on-headline-footer-ast (headline contents)
-  "Inserts contents at the end of the subtree"
-  (apply #'org-element-adopt-elements headline contents))
-
 (defun org-export-head--escape(text)
   (when text
     (let* ((text (replace-regexp-in-string " " "_" text))
@@ -446,40 +374,12 @@ As well as a list of the headline names"
            (text (replace-regexp-in-string "[\\?.,!]" "" text)))
       text)))
 
-(defun org-export-head--get-content-subtree-match-tag-ast(match ast)
-  (let ((contents nil))
-    (org-element-map ast 'headline
-      (lambda (headline)
-        (when (member match (org-element-property :tags headline))
-          (setq contents   (nconc contents (org-element-contents headline)))))) 
-    contents))
-
-
-
-;;Functions not in use that can be used to easily add more template things.
-(defun org-export-head--insert-content-match-headline-in-not-match-headline-ast(from-match to-not-match headline)
-  (org-export-head--run-on-not-match-headline-ast 
-   #'(lambda (headline) 
-       (org-export-head--insert-on-headline-header-ast 
-        headline
-        (org-export-head--get-content-subtree-match-tag-ast from-match ast)))
-   to-not-match ast))
-
-
-(defun org-export-head--insert-content-match-headline-in-match-headline-ast(from-match to-match headline)
-  (org-export-head--run-on-not-match-headline-ast 
-   #'(lambda (headline) 
-       (org-export-head--insert-on-headline-header-ast 
-        headline
-        (org-export-head--get-content-subtree-match-tag-ast from-match ast)))
-   to-match ast))
-
 
 
 #+END_SRC
 
 #+RESULTS:
-: org-export-head--insert-content-match-headline-in-match-headline-ast
+: org-export-head--escape
 
 
 * Includes :noexport:
@@ -502,7 +402,7 @@ Excelsior!
 - [[Broken][Should say Broken link]]
 #+end_menu
 #+end_head
-###CREATION-DATE### -- Last Modified:  ###MODIFICATION-DATE###
+
 
 @@html: <h1>@@
 {{{title}}} @@comment: This is the title of the headline @@
@@ -511,11 +411,6 @@ Excelsior!
 #+TOC: headlines 2
 
 * Index 
-  :PROPERTIES:
-  :CREATION-DATE: 2018-09-08
-  :MODIFICATION-DATE: 2018-09-08
-  :HASH:     cdc4d803c2a5573f70c9481d1929555e
-  :END:
 This is my index! It uses a macro
 
 ** Index is here!
@@ -524,11 +419,6 @@ This is my index! It uses a macro
 
    
 * Foo
-  :PROPERTIES:
-  :CREATION-DATE: 2018-09-08
-  :MODIFICATION-DATE: 2018-09-08
-  :HASH:     32c8a7514f907605802848e9650f52ff
-  :END:
 ** subheader 0
 SCHEDULED: <2018-08-31 Fri>
 
@@ -555,22 +445,12 @@ This is an example page that will be generated.
 #+END_SRC
 
 * Bar
-  :PROPERTIES:
-  :CREATION-DATE: 2018-09-08
-  :MODIFICATION-DATE: 2018-09-08
-  :HASH:     ded0b285d7888765fec0904947ed4902
-  :END:
   
 Here we show that footnotes work [fn:1].
 
 They are pretty great! [fn:2]
 
 * Foo Bar
-  :PROPERTIES:
-  :CREATION-DATE: 2018-09-08
-  :MODIFICATION-DATE: 2018-09-08
-  :HASH:     34613cdf6aa710950e856cfa21c228d0
-  :END:
   Nothing to see here
 (org-export-head)
   ###previous###
