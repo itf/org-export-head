@@ -53,55 +53,62 @@ are exported to a filename derived from the headline text."
   (org-export-head--update-hashes)
   (if (not reexport)
       (org-export-head--delete-noreexport))
+
+
+  ;;Get headlines, and generate macros (previous post, etc)
+  (let* ((headlines-hash-list (org-export-head--get-headlines))
+         (headlines-hash (car headlines-hash-list))
+         (headlines-list (cdr headlines-hash-list))
+
+         ;;Insert extra things in the headlines-hash to be used for fixing the macros
+         ;;To define new headline-level macros, add extra functions here
+         (headlines-hash (org-export-head--insert-next-previous-headline headlines-hash headlines-list))
+         ;;Now we get global macros such as the index and the reversed index
+         (global-macros (org-export-head--generate-index-alist headlines-list headlines-hash))
+         
+
+         ;;Now we get the templates. At the moment it is only the header
+         (header (org-export-head--get-content-subtree-match "header")))
   
-  ;;Get the parser tree and the headlines that will become files
-  (let*  ((ast (org-element-parse-buffer))
-          (headlines-hash-list (org-export-head--get-headlines-ast ast))
-          (headlines-hash (car headlines-hash-list))
-          (headlines-list (cdr headlines-hash-list))
-          (headlines-hash (org-export-head--insert-next-previous-headline headlines-hash headlines-list)))
     
-    
-    ;;Get the templates
-    (let ((header (org-export-head--get-content-subtree-match-tag-ast "header" ast))
-          (index (org-export-head--get-index headlines-hash)))
       
-      ;;For each not noexport headline apply the template, i.e. copy contents
-      (org-export-head--run-on-match-headline-ast 
-       #'(lambda (headline) 
-           (org-export-head--insert-on-headline-footer-ast headline index))
-       '("index") ast)
+    ;;For each not noexport/noreexport headline apply the template, i.e. copy contents
+    (org-export-head--run-on-each-heading 
+     #'(lambda ()
+         (org-export-head--insert-on-header header))
+     "-noexport-noreexport")
+
+    ;;After applying the template we replace the macros on all places
+    (org-export-head--run-on-each-heading 
+     #'(lambda ()
+         (let* ((headline-name (org-export-head--headline))
+                (headline-alist (gethash headline-name headlines-hash nil))
+                (macro-alist (append headline-alist global-macros))) ;;in reverse order so that headline properties can overshadow these
+           (org-export-head--replace-headline-macros macro-alist)))
+     "-noexport-noreexport")
+
+  
+    ;;Get the parser tree and the headlines that will become files
+    (let*  ((ast (org-element-parse-buffer)))
       
-      (org-export-head--run-on-not-match-headline-ast 
-       #'(lambda (headline) 
-           (org-export-head--insert-on-headline-header-ast headline header))
-       '("noexport" "noheader" "noreexport") ast)
-
-
+ 
+        ;;Fix links -- order is important. First external than fuzzy links
+        (org-element-map ast 'link
+          (lambda (link)
+            (let* ((link (or (org-export-head--fix-file-external-link-ast directory-path link) link))
+                   (link (or (org-export-head--fix-local-link-ast headlines-hash link) link))))))
       
-      ;;Fix links -- order is important. First external than fuzzy links
-      (org-element-map ast 'link
-        (lambda (link)
-          (let* ((link (or (org-export-head--fix-file-external-link-ast directory-path link) link))
-                 (link (or (org-export-head--fix-local-link-ast headlines-hash link) link)))))))
-    
-    ;;Convert the buffer to contain the new AST, 
-    ;;this is needed because the exporter expects the content to be in a buffer
-    (erase-buffer) 
-    (insert (org-element-interpret-data ast))
-
-      ;;After applying the template we replace the macros on all places
-      (org-export-head--run-on-each-heading 
-       #'(lambda ()
-           (let ((macro-plist (org-export-head--generate-macro-plist headlines-hash)))
-             (org-export-head--replace-headline-macros macro-plist)))
-       "-noexport-noreexport")
-
-    (outline-show-all)
-    
-    ;;Finally export all the headers
-    (org-export-head-export-headers directory-path backend)))
-
+      ;;Convert the buffer to contain the new AST, 
+      ;;this is needed because the exporter expects the content to be in a buffer
+      (erase-buffer) 
+      (insert (org-element-interpret-data ast))
+      
+      
+      (outline-show-all)
+      
+      ;;Finally export all the headers
+      (org-export-head-export-headers directory-path backend))))
+  
 
 
 ;;Not everything can be done using the AST, sadly.
@@ -248,19 +255,19 @@ As well as a list of the headline names"
   (org-export-head--escape (org-export-head--headline)))
 
 
-(defun org-export-head--replace-headline-macros(macro-plist)
+(defun org-export-head--replace-headline-macros(macro-alist)
   (save-excursion
     (org-back-to-heading)
     ;;End of subtree might change because of macro expansion, so it is recalculated.
     (while (re-search-forward "\\#\\#\\#\\([-A-Za-z_]+\\)\\#\\#\\#" (save-excursion (org-end-of-subtree)) t)
       (unless (org-in-src-block-p)
         (let* ((macro (match-string-no-properties  1))
-               (macro-subs (lax-plist-get macro-plist macro)))
+               (macro-subs (cdr (assoc macro macro-alist))))
           (if macro-subs
-              (replace-match macro-subs)
+              (replace-match  macro-subs t t)
             (replace-match "")))))))
 
-(defun org-export-head--generate-macro-plist(headlines-hash)
+(defun org-export-head--generate-macro-plist(headlines-hash headlines-list)
   (let* ((headline-name (org-export-head--headline))
          (headline (gethash headline-name headlines-hash nil))
          (macro-plist ())
@@ -271,6 +278,27 @@ As well as a list of the headline names"
     macro-plist))
     
 
+(defun org-export-head--get-content-subtree-match(match)
+  (save-excursion
+  (let ((content "")) 
+    (org-export-head--run-on-each-heading
+     #'(lambda() 
+         (setq content (concat content (org-export-head--get-content-subtree-at-point)))) 
+     match)
+    content)))
+
+(defun org-export-head--insert-on-header (text)
+  (save-excursion
+    (org-export-head--goto-header)
+    (insert text)))
+
+(defun org-export-head--generate-index-alist (headlines-list headlines-hash)
+  (let ((index "")
+        (reverse-index ""))
+    (dolist (headline headlines-list)
+      (setq reverse-index (concat index "- [["headline"]["headline"]]\n"))
+      (setq index (concat "- [["headline"]["headline"]]\n" index)))
+    (list (cons "INDEX" index) (cons "REVERSE-INDEX" reverse-index))))
 ;;END OF NON AST (non org-element) SESSION
 
 
@@ -373,11 +401,12 @@ As well as a list of the headline names"
       (let* ((previous (nth 0 temp-list))
             (headline-name (nth 1 temp-list))
             (next (nth 2 temp-list))
-            (headline (gethash headline-name headlines-hash nil)))
-            (org-element-put-property headline :PREVIOUS previous)
-            (org-element-put-property headline :NEXT next)
-            (org-element-put-property headline :PREVIOUS_URL (concat "file:" (org-export-head--headline-to-file previous)))
-            (org-element-put-property headline :NEXT_URL (concat "file:" (org-export-head--headline-to-file next))))
+            (headline (gethash headline-name headlines-hash nil))
+            (new-properties 
+             (list (cons "PREVIOUS" previous)
+                   (cons "NEXT" next)))
+            (headline (append headline new-properties))) ;; In reverse order, to allow headline properties to shadow this.
+        (puthash headline-name headline headlines-hash))
         (setq temp-list (cdr temp-list))))
   headlines-hash)
       
@@ -466,14 +495,14 @@ Creates a hard link to org.css in the export directory.
 Excelsior!
 #+end_catch-phrase
 
-#+begin_nav
+#+begin_menu
 - [[Index][home]]
 - [[Foo][Foo!!]]
 - [[Foo Bar][Foo Bar!!]]
 - [[Broken][Should say Broken link]]
-#+end_nav
+#+end_menu
 #+end_head
-
+###CREATION-DATE### -- Last Modified:  ###MODIFICATION-DATE###
 
 @@html: <h1>@@
 {{{title}}} @@comment: This is the title of the headline @@
@@ -481,16 +510,25 @@ Excelsior!
 
 #+TOC: headlines 2
 
-* Index :index:
-This is my index! Sadly during export I lose access to all information related to it. 
+* Index 
+  :PROPERTIES:
+  :CREATION-DATE: 2018-09-08
+  :MODIFICATION-DATE: 2018-09-08
+  :HASH:     cdc4d803c2a5573f70c9481d1929555e
+  :END:
+This is my index! It uses a macro
 
-Anyway:
 ** Index is here!
 
-
+###INDEX###
 
    
 * Foo
+  :PROPERTIES:
+  :CREATION-DATE: 2018-09-08
+  :MODIFICATION-DATE: 2018-09-08
+  :HASH:     32c8a7514f907605802848e9650f52ff
+  :END:
 ** subheader 0
 SCHEDULED: <2018-08-31 Fri>
 
@@ -517,12 +555,22 @@ This is an example page that will be generated.
 #+END_SRC
 
 * Bar
+  :PROPERTIES:
+  :CREATION-DATE: 2018-09-08
+  :MODIFICATION-DATE: 2018-09-08
+  :HASH:     ded0b285d7888765fec0904947ed4902
+  :END:
   
 Here we show that footnotes work [fn:1].
 
 They are pretty great! [fn:2]
 
 * Foo Bar
+  :PROPERTIES:
+  :CREATION-DATE: 2018-09-08
+  :MODIFICATION-DATE: 2018-09-08
+  :HASH:     34613cdf6aa710950e856cfa21c228d0
+  :END:
   Nothing to see here
 (org-export-head)
   ###previous###

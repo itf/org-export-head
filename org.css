@@ -1121,25 +1121,30 @@ p.verse{
     }
 }
 
+menu {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 20px;
+}
 
-nav ul {
+menu ul {
     list-style: none;
 }
-nav li {
+menu li {
     display: inline-block;
 }
-nav li + li:before {
+menu li + li:before {
     display: inline-block;
     content: "\00B7 \00a0";
     color: #ccc;
 }
 
-nav ul {
+menu ul {
     padding: 0;
     margin: 0 0 20px;
 }
 
-nav a {
+menu a {
     /*color: #333;*/
 }
 
