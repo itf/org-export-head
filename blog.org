@@ -1,7 +1,7 @@
 #+OPTIONS:   broken-links:mark
-#+OPTIONS: toc:nil num:3 H:4 ^:nil pri:t title:nil  html-style:nil html5-fancy:t
+#+OPTIONS: toc:nil num:3 H:4 ^:{} pri:t title:nil  html-style:nil html5-fancy:t
 #+HTML_DOCTYPE: html5
-#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="org.css"/>
+#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="css/org.css"/>
 * README                                                           :noexport:
 Run the code inside the code block.
 
@@ -207,7 +207,8 @@ are exported to a filename derived from the headline text."
 
 (defun org-export-head-hash-function(text)
   "Function to calculate the hash of text.
-Can be changed to something such as (length text) to run even faster."
+Can be changed to something such as (length text) to run even faster.
+Shouldn't rally affect the time to export unless your file contains over 100 thousand lines of text"
   (md5 text))
 
 ;;;END HASH CODE
@@ -295,11 +296,20 @@ Where match is a tag or -tag or combination of them."
 (defun org-export-head--generate-index-alist (headlines-list headlines-hash)
   "Geneates an org list with the index of the website and inserts it in an alist"
   (let ((index "")
-        (reverse-index ""))
-    (dolist (headline headlines-list)
-      (setq reverse-index (concat index "- [["headline"]["headline"]]\n"))
-      (setq index (concat "- [["headline"]["headline"]]\n" index)))
-    (list (cons "INDEX" index) (cons "REVERSE-INDEX" reverse-index))))
+        (reverse-index "")
+        (index-with-dates ""))
+    (dolist (headline-name headlines-list)
+      (let* ((headline-alist (gethash headline-name headlines-hash nil))
+             (creation-date (cdr (assoc "CREATION-DATE" headline-alist)))
+             (modification-date (cdr (assoc "MODIFICATION-DATE" headline-alist))))
+        (setq reverse-index (concat index "- [["headline-name"]["headline-name"]]\n"))
+        (setq index (concat "- [["headline-name"]["headline-name"]]\n" index))
+        (setq index-with-dates (concat "- [["headline-name"]["headline-name"]]"
+                                       "@@html:<span class=\"page-date\">@@"
+                                       " (" creation-date", updated " modification-date ")"
+                                       "@@html:</span>@@" "\n" 
+                                       index-with-dates))))
+    (list (cons "INDEX" index) (cons "REVERSE-INDEX" reverse-index)  (cons "INDEX-WITH-DATES" index-with-dates))))
 ;;END OF NON AST (non org-element) SESSION
 
 
@@ -327,7 +337,7 @@ Where match is a tag or -tag or combination of them."
            ;;of the current dir. This causes some file conflits in edge cases
            ;;e.g: ../images and ../../images will map to the same place. This should be rare in normal usage
            (new-relative-path 
-            (replace-regexp-in-string "\\.\\./" "" (file-relative-name path)))
+            (concat "./" (file-name-extension path) "/" (file-name-nondirectory path)))
            (new-hard-link-path (concat directory-path new-relative-path))
            (new-hard-link-directory (file-name-directory new-hard-link-path)))
       
@@ -376,6 +386,7 @@ Where match is a tag or -tag or combination of them."
 
 
 
+
 #+END_SRC
 
 #+RESULTS:
@@ -415,8 +426,7 @@ This is my index! It uses a macro
 
 ** Index is here!
 
-###INDEX###
-
+###INDEX-WITH-DATES###
    
 * Foo
 ** subheader 0
