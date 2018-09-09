@@ -56,12 +56,15 @@ are exported to a filename derived from the headline text."
   
   ;;Get the parser tree and the headlines that will become files
   (let*  ((ast (org-element-parse-buffer))
-          (headlines (org-export-head--get-headlines-ast ast)))
+          (headlines-hash-list (org-export-head--get-headlines-ast ast))
+          (headlines-hash (car headlines-hash-list))
+          (headlines-list (cdr headlines-hash-list))
+          (headlines-hash (org-export-head--insert-next-previous-headline headlines-hash headlines-list)))
     
     
     ;;Get the templates
     (let ((header (org-export-head--get-content-subtree-match-tag-ast "header" ast))
-          (index (org-export-head--get-index headlines)))
+          (index (org-export-head--get-index headlines-hash)))
       
       ;;For each not noexport headline apply the template, i.e. copy contents
       (org-export-head--run-on-match-headline-ast 
@@ -73,17 +76,27 @@ are exported to a filename derived from the headline text."
        #'(lambda (headline) 
            (org-export-head--insert-on-headline-header-ast headline header))
        '("noexport" "noheader" "noreexport") ast)
+
+
       
       ;;Fix links -- order is important. First external than fuzzy links
       (org-element-map ast 'link
         (lambda (link)
           (let* ((link (or (org-export-head--fix-file-external-link-ast directory-path link) link))
-                 (link (or (org-export-head--fix-local-link-ast headlines link) link)))))))
+                 (link (or (org-export-head--fix-local-link-ast headlines-hash link) link)))))))
     
     ;;Convert the buffer to contain the new AST, 
     ;;this is needed because the exporter expects the content to be in a buffer
     (erase-buffer) 
     (insert (org-element-interpret-data ast))
+
+      ;;After applying the template we replace the macros on all places
+      (org-export-head--run-on-each-heading 
+       #'(lambda ()
+           (let ((macro-plist (org-export-head--generate-macro-plist headlines-hash)))
+             (org-export-head--replace-headline-macros macro-plist)))
+       "-noexport-noreexport")
+
     (outline-show-all)
     
     ;;Finally export all the headers
@@ -155,20 +168,14 @@ are exported to a filename derived from the headline text."
           (end (org-end-of-subtree t))) 
       (buffer-substring start end))))
 
-(defun get-hash-value-content()
-  "Gets the hash of the subtree at point"
-  (hash-function (org-export-head--get-content-subtree-at-point)))
 
-(defun hash-function (text)
-  (md5 text))
-
-
+;;; HASH code
 ;;Idea from https://emacs.stackexchange.com/a/39376/20165
 (defun org-export-head--update-hashes()
   "Updates the hashes of all the headings"
   (org-export-head--run-on-each-heading 
    #'(lambda()
-       (let ((new-hash  (format "%s" (get-hash-value-content)))
+       (let ((new-hash  (format "%s" (org-export-head-get-hash-value-content)))
              (old-hash (org-entry-get-with-inheritance "HASH"))
              (older-hash (org-entry-get-with-inheritance "PREVIOUS-HASH"))) 
          (if (not old-hash)
@@ -183,6 +190,16 @@ are exported to a filename derived from the headline text."
          (if (not (equal old-hash older-hash))
                (org-set-property "PREVIOUS-HASH" (or old-hash "")))))
    "-noexport"))
+
+
+(defun org-export-head-get-hash-value-content()
+  "Gets the hash of the subtree at point"
+  (org-export-head-hash-function (org-export-head--get-content-subtree-at-point)))
+
+(defun org-export-head-hash-function(text)
+  (md5 text))
+
+;;;END HASH CODE
 
 (defun org-export-head--delete-noreexport()
   "Faster export by deleting things that won't be exported so we don't process them and their links"
@@ -204,6 +221,25 @@ are exported to a filename derived from the headline text."
           (end (org-end-of-subtree))) 
       (delete-region start end))))
 
+
+
+(defun org-export-head--get-headlines ()
+  "Returns a tuple that contains a hashtable of headline name to Alist of headline properties
+As well as a list of the headline names"
+  (flet ((make-hash ()
+                   (make-hash-table :test 'equal))
+         (add-to-hash (hashtable)
+                      (puthash (org-export-head--headline) (org-entry-properties) hashtable)))
+    (let ((headlines-hash (make-hash))
+          (headlines-list ()))
+      (org-export-head--run-on-each-heading 
+       #'(lambda()
+           (add-to-hash headlines-hash)
+           (setq headlines-list (cons (org-export-head--headline) headlines-list)))
+       "-noexport -nosomething")
+      (cons headlines-hash headlines-list))))
+
+
 (defun org-export-head--headline ()
   "Gets the headline title if point is at the headline"
   (nth 4 (org-heading-components)))
@@ -211,6 +247,29 @@ are exported to a filename derived from the headline text."
 (defun org-export-head--escaped-headline ()
   (org-export-head--escape (org-export-head--headline)))
 
+
+(defun org-export-head--replace-headline-macros(macro-plist)
+  (save-excursion
+    (org-back-to-heading)
+    ;;End of subtree might change because of macro expansion, so it is recalculated.
+    (while (re-search-forward "\\#\\#\\#\\([-A-Za-z_]+\\)\\#\\#\\#" (save-excursion (org-end-of-subtree)) t)
+      (unless (org-in-src-block-p)
+        (let* ((macro (match-string-no-properties  1))
+               (macro-subs (lax-plist-get macro-plist macro)))
+          (if macro-subs
+              (replace-match macro-subs)
+            (replace-match "")))))))
+
+(defun org-export-head--generate-macro-plist(headlines-hash)
+  (let* ((headline-name (org-export-head--headline))
+         (headline (gethash headline-name headlines-hash nil))
+         (macro-plist ())
+         (macro-plist (lax-plist-put macro-plist "next" (org-element-property :NEXT headline)))
+         (macro-plist (lax-plist-put macro-plist "previous" (org-element-property :PREVIOUS headline)))
+         (macro-plist (lax-plist-put macro-plist "next-url" (org-element-property :NEXT_URL headline)))
+         (macro-plist (lax-plist-put macro-plist "previous-url" (org-element-property :PREVIOUS_URL headline))))
+    macro-plist))
+    
 
 ;;END OF NON AST (non org-element) SESSION
 
@@ -291,16 +350,37 @@ are exported to a filename derived from the headline text."
           (funcall fn headline))))))
 
 
-(defun org-export-head--get-headlines-ast (ast)
+(defun org-export-head--get-headlines-ast(ast)
   (flet ((make-hash ()
                     (make-hash-table :test 'equal))
          (add-to-hash (headline set)
                       (puthash (org-element-property :raw-value headline)  headline set)))
-    (let ((set (make-hash)))
+    (let ((headlines-hash (make-hash))
+          (headlines-list '()))
       (org-export-head--run-on-not-match-headline-ast
-       #'(lambda(headline) (add-to-hash headline set))
-       '("noexport") ast)
-      set)))
+       #'(lambda(headline) 
+           (add-to-hash headline headlines-hash)
+           (setq headlines-list (cons (org-element-property :raw-value headline)  headlines-list)))
+       '("noexsport") ast)
+      (cons headlines-hash headlines-list))))
+
+
+
+(defun org-export-head--insert-next-previous-headline(headlines-hash headlines-list)
+  (let* ((temp-list (cons nil headlines-list))
+        (len (length headlines-list)))
+    (dotimes (i len)
+      (let* ((previous (nth 0 temp-list))
+            (headline-name (nth 1 temp-list))
+            (next (nth 2 temp-list))
+            (headline (gethash headline-name headlines-hash nil)))
+            (org-element-put-property headline :PREVIOUS previous)
+            (org-element-put-property headline :NEXT next)
+            (org-element-put-property headline :PREVIOUS_URL (concat "file:" (org-export-head--headline-to-file previous)))
+            (org-element-put-property headline :NEXT_URL (concat "file:" (org-export-head--headline-to-file next))))
+        (setq temp-list (cdr temp-list))))
+  headlines-hash)
+      
 
 (defun org-export-head--headline-to-file(headline-name)
   "Generate the file name of the headline"
@@ -308,7 +388,7 @@ are exported to a filename derived from the headline text."
 
 
 ;;Quite ugly, but necessary to not insert things inside the properties drawer
-(defun org-export-head--insert-on-headline-header-ast (headline contents)
+(defun org-export-head--insert-on-headline-header-ast(headline contents)
   "Inserts contents after the properties of headline."
   ;;The only way to find where the properties end is by scanning the tree and knowing
   ;;That any content inside a headline is inside a "section" element.
@@ -331,10 +411,11 @@ are exported to a filename derived from the headline text."
   (apply #'org-element-adopt-elements headline contents))
 
 (defun org-export-head--escape(text)
-  (let* ((text (replace-regexp-in-string " " "_" text))
-         (text (replace-regexp-in-string "/" "-" text))
-         (text (replace-regexp-in-string "[\\?.,!]" "" text)))
-    text))
+  (when text
+    (let* ((text (replace-regexp-in-string " " "_" text))
+           (text (replace-regexp-in-string "/" "-" text))
+           (text (replace-regexp-in-string "[\\?.,!]" "" text)))
+      text)))
 
 (defun org-export-head--get-content-subtree-match-tag-ast(match ast)
   (let ((contents nil))
@@ -395,9 +476,7 @@ Excelsior!
 
 
 @@html: <h1>@@
-#+BEGIN_SRC emacs-lisp :exports results :results value raw
-(org-element-interpret-data (plist-get (org-export-get-environment nil t) ':title))
-#+END_SRC
+{{{title}}} @@comment: This is the title of the headline @@
 @@html: </h1>@@
 
 #+TOC: headlines 2
@@ -445,6 +524,8 @@ They are pretty great! [fn:2]
 
 * Foo Bar
   Nothing to see here
+(org-export-head)
+  ###previous###
 * Footnotes :noexport:
 
 [fn:2] My second foot note!
