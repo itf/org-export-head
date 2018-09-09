@@ -225,7 +225,7 @@ Shouldn't rally affect the time to export unless your file contains over 100 tho
                (org-toggle-tag "noreexport" 'on)
                ;;faster export by deleting noexport things before processing
                (org-export-head--erase-content-subtree))))) 
-   "-noexport"))
+   "-noexport-reexport"))
 
 (defun org-export-head--erase-content-subtree()
   (save-excursion
@@ -248,7 +248,7 @@ As well as a list of the headline names"
        #'(lambda()
            (add-to-hash headlines-hash)
            (setq headlines-list (cons (org-export-head--headline) headlines-list)))
-       "-noexport -nosomething")
+       "-noexport")
       (cons headlines-hash headlines-list))))
 
 
