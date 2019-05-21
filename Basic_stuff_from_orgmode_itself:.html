@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- 2019-05-20 Mon 23:19 -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Basic stuff from orgmode itself:</title>
+<meta name="generator" content="Org mode">
+<meta name="author" content="ivanaf">
+<link rel="stylesheet" type="text/css" href="css/org.css"/>
+<script type="text/javascript">
+/*
+@licstart  The following is the entire license notice for the
+JavaScript code in this tag.
+
+Copyright (C) 2012-2019 Free Software Foundation, Inc.
+
+The JavaScript code in this tag is free software: you can
+redistribute it and/or modify it under the terms of the GNU
+General Public License (GNU GPL) as published by the Free Software
+Foundation, either version 3 of the License, or (at your option)
+any later version.  The code is distributed WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the GNU GPL for more details.
+
+As additional permission under GNU GPL version 3 section 7, you
+may distribute non-source (e.g., minimized or compacted) forms of
+that code without the copy of the GNU GPL normally required by
+section 4, provided you include this license notice and a URL
+through which recipients can access the Corresponding Source.
+
+
+@licend  The above is the entire license notice
+for the JavaScript code in this tag.
+*/
+<!--/*--><![CDATA[/*><!--*/
+ function CodeHighlightOn(elem, id)
+ {
+   var target = document.getElementById(id);
+   if(null != target) {
+     elem.cacheClassElem = elem.className;
+     elem.cacheClassTarget = target.className;
+     target.className = "code-highlighted";
+     elem.className   = "code-highlighted";
+   }
+ }
+ function CodeHighlightOff(elem, id)
+ {
+   var target = document.getElementById(id);
+   if(elem.cacheClassElem)
+     elem.className = elem.cacheClassElem;
+   if(elem.cacheClassTarget)
+     target.className = elem.cacheClassTarget;
+ }
+/*]]>*///-->
+</script>
+<script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+        displayAlign: "center",
+        displayIndent: "0em",
+
+        "HTML-CSS": { scale: 100,
+                        linebreaks: { automatic: "false" },
+                        webFont: "TeX"
+                       },
+        SVG: {scale: 100,
+              linebreaks: { automatic: "false" },
+              font: "TeX"},
+        NativeMML: {scale: 100},
+        TeX: { equationNumbers: {autoNumber: "AMS"},
+               MultLineWidth: "85%",
+               TagSide: "right",
+               TagIndent: ".8em"
+             }
+});
+</script>
+<script type="text/javascript"
+        src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-AMS_HTML"></script>
+</head>
+<body>
+<div id="content">
+<div class="head">
+<div class="title">
+<p>
+<a href="index.html">Ivan @ Home</a>
+</p>
+
+</div>
+<div class="catch-phrase">
+<p>
+Excelsior!
+</p>
+
+</div>
+
+<menu>
+<ul class="org-ul">
+<li><a href="index.html">home</a></li>
+<li><a href="Foo.html">Foo!!</a></li>
+<li><a href="Foo_Bar.html">Foo Bar!!</a></li>
+<li>[BROKEN LINK: Broken]</li>
+</ul>
+</menu>
+
+</div>
+
+
+<p>
+ <h1>
+Basic stuff from orgmode itself: 
+ </h1>
+</p>
+
+<p>
+<span class=page-date> <small>
+2019-05-20, updated 2019-05-20 <a href="index.html">next</a> - <a href="Foo_Bar.html">previous</a>
+</small> </span> 
+Just some examples on how you can use orgmode on your blog.
+</p>
+
+<p>
+table:
+</p>
+<table>
+
+
+<colgroup>
+<col  class="org-left">
+
+<col  class="org-left">
+</colgroup>
+<tbody>
+<tr>
+<td class="org-left">dsdds</td>
+<td class="org-left">dsdsd</td>
+</tr>
+
+<tr>
+<td class="org-left">&#xa0;</td>
+<td class="org-left">&#xa0;</td>
+</tr>
+
+<tr>
+<td class="org-left">ss</td>
+<td class="org-left">ss</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+\(LATEX\) 
+</p>
+
+<p>
+At the moment if you generate an image using code, it must be in an \/extension\/ folder. Other images can be anywhere and they will be properly moved.
+</p>
+
+<p>
+Some tikz:
+</p>
+<div class="org-src-container">
+<pre class="src src-latex"><span style="color: #a626a4;">\begin</span>{<span style="color: #0184bc;">tikzpicture</span>}
+<span style="color: #a626a4;">\draw</span>[-&gt;] (-3,0) -- (-2,0) arc[radius=0.5cm,start angle=-180,end angle=0] (-1,0) -- (1,0) arc[radius=0.5cm,start angle=180,end angle=0] (2,0) -- (3,0);
+<span style="color: #a626a4;">\filldraw</span> (-1.5,0) circle[radius=1mm];
+<span style="color: #a626a4;">\filldraw</span> (1.5,0) circle[radius=1mm];
+<span style="color: #a626a4;">\end</span>{<span style="color: #0184bc;">tikzpicture</span>}
+</pre>
+</div>
+
+
+<figure>
+<object type="image/svg+xml" data="./svg/example.svg" class="org-svg">
+Sorry, your browser does not support SVG.</object>
+
+</figure>
+
+<p>
+some code:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-python" id="orgsrcblock1"><span style="color: #a626a4;">import</span> matplotlib, numpy
+matplotlib.use(<span style="color: #50a14f;">'Agg'</span>)
+<span style="color: #a626a4;">import</span> matplotlib.pyplot <span style="color: #a626a4;">as</span> plt
+<span style="color: #8b4513;">fig</span>=plt.figure(figsize=(4,2))
+<span style="color: #8b4513;">x</span>=numpy.linspace(-15,15)
+plt.plot(numpy.sin(x)/x)
+fig.tight_layout()
+plt.savefig(<span style="color: #50a14f;">'./png/python-matplot-fig.png'</span>)
+<span style="color: #a626a4;">return</span> <span style="color: #50a14f;">'./png/python-matplot-fig.png'</span> <span style="color: #a0a1a7; font-weight: bold;"># </span><span style="color: #a0a1a7;">return filename to org-mode</span>
+</pre>
+</div>
+
+
+<figure>
+<img src="./png/python-matplot-fig.png" alt="python-matplot-fig.png">
+
+</figure>
+
+<div class="org-src-container">
+<pre class="src src-dot">  digraph {
+  // graph from left to right
+  rankdir=LR;
+  splines=true;
+  node [shape=box];
+ 
+  id [label=<span style="color: #50a14f;">"Install Graphviz"</span>]
+  conf [label=<span style="color: #50a14f;">"Configure org-babel"</span>]
+  dot [label=<span style="color: #50a14f;">"DOT in org-mode"</span>]
+ 
+  id -&gt; conf [label=<span style="color: #50a14f;">"0.2"</span>, weight=1]
+  conf -&gt; dot[color=red, penwidth=3.0]
+  id -&gt; dot [label=<span style="color: #50a14f;">"0.1"</span>, weight=2]  
+  dot -&gt; <span style="color: #50a14f;">"Profit"</span>
+  id -&gt; <span style="color: #50a14f;">"Profit"</span>  [label=<span style="color: #50a14f;">"0.2"</span>, weight=3]
+  dot -&gt; <span style="color: #50a14f;">"Success"</span> [style=dotted]
+  {rank=same; conf,dot}  
+}
+</pre>
+</div>
+
+
+<figure>
+<img src="./png/dot_success.png" alt="dot_success.png">
+
+</figure>
+
+</br>
+<div class="comments">
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+/* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+    var disqus_shortname = 'ivanaf'; // Required - Replace '<example>' with your forum shortname
+    /* * * DON'T EDIT BELOW THIS LINE * * */
+    var showComments = function() {
+    var button = document.getElementById('comment-button')
+        button.style.display = 'none'
+        var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+        dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+        (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+        };
+    </script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<button id="comment-button" onclick="showComments()">Show comments</button>
+</div>
+</div>
+<div id="postamble" class="status">
+<p class="author">Author: Ivan Tadeu Ferreira Antunes Filho</p>
+<p class="date">Date: 2019-05-20 Mon 23:19</p>
+<p class="author">Github:  <a href="https://github.com/itf/">github.com/itf</a></p>
+<p class="creator">Made with <a href="https://www.gnu.org/software/emacs/">Emacs</a> 27.0.50 (<a href="https://orgmode.org">Org</a> mode 9.1.9) and <a href="https://github.com/itf/org-export-head">Org export head</a> </p>
+</div>
+</body>
+</html>
