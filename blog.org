@@ -7,14 +7,36 @@ Run the code inside the code block.
 
 Run M-x org-export-head or (org-export-head directory backend)
 
-The MENU and FOOTNOTES have to be :noexport: It cannot contain a property drawer at the moment.
+The MENU and FOOTNOTES have to be :noexport: And they cannot contain a property drawer at the moment.
 
-* Code                                                             :noexport: 
+So far the only tags we use are:  header, noexport and reexport. 
+Put a header tag to mark what is the header that should be copied to every page. 
+Mark something with reexport to always reexport something.
+Put the noexport tag to state that some header should not become a page.
+
+Index should have the reexport tag to always be reexported.
+
+You can use the macros ###MACRO###, which will be replaced with that particular headline property.
+
+You can also use ###INDEX-WITH-DATES###  or ###TAG-WITH-DATES###, or simply ###INDEX### / ###TAG###  to display list of matching posts.
+
+If you want summaries on your index, just write ###INDEX-WITH-SUMMARIES###.
+
+A headline whose text starts witha new line will have no summary. Otherwise it will have a summary. You can also define a summary by giving a property SUMMARY to the headline.
+
+* Code    `                                                        :noexport: 
 #+BEGIN_SRC emacs-lisp   
 
 ;; based on http://pragmaticemacs.com/emacs/export-org-mode-headlines-to-separate-files/
 ;; export headlines to separate files
 ;; http://emacs.stackexchange.com/questions/2259/how-to-export-top-level-headings-of-org-mode-buffer-to-separate-files
+
+(setq org-export-head--html-postamble 
+"<p class=\"author\">Author: Ivan Tadeu Ferreira Antunes Filho</p>
+<p class=\"date\">Date: %T</p>
+<p class=\"author\">Github:  <a href=\"https://github.com/itf/\">github.com/itf</a></p>
+<p class=\"creator\">Made with %c and <a href=\"https://github.com/itf/org-export-head\">Org export head</a> </p>")
+
 
 (defun org-export-head--run-on-temp-copy-buffer (function-to-run &rest args)
   "Runs function on a temp buffer with the contents of the original buffer"
@@ -49,11 +71,13 @@ separate files.
 
 Subtrees that do not have the :EXPORT_FILE_NAME: property set
 are exported to a filename derived from the headline text."
-  ;; Delete content that has already been exported and set it to noreexport
   (org-export-head--update-hashes)
+
+  ;; Create summaries before deleting the posts
+  (org-export-head--create-summaries)
+  ;; Delete content that has already been exported and set it to noreexport
   (if (not reexport)
       (org-export-head--delete-noreexport))
-
 
   ;;Get headlines, and generate macros (previous post, etc)
   (let* ((headlines-hash-list (org-export-head--get-headlines))
@@ -68,14 +92,17 @@ are exported to a filename derived from the headline text."
          
 
          ;;Now we get the templates. At the moment it is only the header
-         (header (org-export-head--get-content-subtree-match "header")))
-  
-    
+         (header (org-export-head--get-content-subtree-match "header"))
+         ;;And now the footer, for example, for comments
+         (footer (org-export-head--get-content-subtree-match "footer")))
+
+
       
     ;;For each not noexport/noreexport headline apply the template, i.e. copy contents
     (org-export-head--run-on-each-heading 
      #'(lambda ()
-         (org-export-head--insert-on-header header))
+         (org-export-head--insert-on-header header)
+         (org-export-head--insert-on-footer footer))
      "-noexport-noreexport")
 
     ;;After applying the template we replace the macros on all places
@@ -142,7 +169,8 @@ are exported to a filename derived from the headline text."
             "EXPORT_FILE_NAME"
             (concat directory-name (org-export-head--escaped-headline)))
            (deactivate-mark)
-           (org-html-export-to-html nil t)
+           (let ((org-html-postamble org-export-head--html-postamble))
+             (org-html-export-to-html nil t))
            (set-buffer-modified-p t)) "-noexport-noreexport"))
   (if (equal backend "pdf")
       (org-export-head--run-on-each-heading 
@@ -169,13 +197,54 @@ are exported to a filename derived from the headline text."
         (goto-char (point-at-bol 0)))) ;;Go back one line
   (point))
 
+(defun org-export-head--goto-footer(&optional no-new-line)
+  "Puts point at end of ubtree and returns point"
+  (interactive)
+  (org-end-of-subtree)
+  (if (not no-new-line) 
+      (progn
+        (newline)))
+  (point))
+
+
 (defun org-export-head--get-content-subtree-at-point()
+  (interactive)
   "Gets the content of the subtree at point"
   (save-excursion
     (deactivate-mark t)
     (let ((start (org-export-head--goto-header t))
           (end (org-end-of-subtree t))) 
       (buffer-substring start end))))
+
+
+(defun org-export-head--get-summary-at-point(&optional n-paragraphs n-chars)
+  "Gets the summary of the subtree at point"
+  (interactive)
+  (save-excursion
+    (deactivate-mark t)
+    (let* ((n-paragraphs (or n-paragraphs 1))
+           (n-chars (or n-chars 200))
+          (start (org-export-head--goto-header t))
+          (endmax (save-excursion (org-end-of-subtree t)))
+          (endparagraph
+           (save-excursion
+             (dotimes (i n-paragraphs)
+               (org-forward-paragraph))
+             (- (point) 1)))
+          (end (min endmax endparagraph (+ start n-chars))))
+      (buffer-substring start end))))
+
+
+(defun org-export-head--create-summaries()
+  "Creates summary for all the headings"
+  (org-export-head--run-on-each-heading 
+   #'(lambda()
+       (let* ((summary (org-entry-get-with-inheritance "SUMMARY"))
+              (summary (or summary (org-export-head--get-summary-at-point)))
+              (summary (replace-regexp-in-string "\n" " " summary)))
+         (if summary
+             (org-set-property "SUMMARY" summary))))
+   "-noexport"))
 
 
 ;;; HASH code
@@ -265,15 +334,18 @@ As well as a list of the headline names"
 or previous and next post.
 Any headline property can be used as a macro of this type."
   (save-excursion
-    (org-back-to-heading)
-    ;;End of subtree might change because of macro expansion, so it is recalculated.
-    (while (re-search-forward "\\#\\#\\#\\([-A-Za-z_]+\\)\\#\\#\\#" (save-excursion (org-end-of-subtree)) t)
-      (unless (org-in-src-block-p)
-        (let* ((macro (match-string-no-properties  1))
-               (macro-subs (cdr (assoc macro macro-alist))))
-          (if macro-subs
-              (replace-match  macro-subs t t)
-            (replace-match "")))))))
+    ;;Let's find the end of the headline as a marker, since it can move
+    (let ((subtree-end-marker  (save-excursion (org-end-of-subtree) (point-marker)))) 
+      ;; End of subtree might change because of macro expansion, so it is recalculated.
+      ;; Macros might be substituted for something smaller, so we move the point on to the left at the end.
+      (while (re-search-forward "\\#\\#\\#\\([-A-Za-z_]+\\)\\#\\#\\#" (marker-position subtree-end-marker) t)
+        (unless (org-in-src-block-p)
+          (let* ((macro (match-string-no-properties 1))
+                 (macro-subs (cdr (assoc macro macro-alist))))
+            (if macro-subs
+                (replace-match  macro-subs t t)
+              (replace-match ""))
+            (backward-char)))))))
 
 
 (defun org-export-head--get-content-subtree-match(match)
@@ -293,23 +365,75 @@ Where match is a tag or -tag or combination of them."
     (org-export-head--goto-header)
     (insert text)))
 
+(defun org-export-head--insert-on-footer (text)
+  "Insert text on the footer (end) of the subtree"
+  (save-excursion
+    (org-export-head--goto-footer)
+    (insert text)))
+
 (defun org-export-head--generate-index-alist (headlines-list headlines-hash)
   "Geneates an org list with the index of the website and inserts it in an alist"
   (let ((index "")
         (reverse-index "")
-        (index-with-dates ""))
+        (index-with-dates "")
+        (index-with-summaries "")
+        (tags ())
+        (tags-indexes ()))
     (dolist (headline-name headlines-list)
       (let* ((headline-alist (gethash headline-name headlines-hash nil))
+             (entry-tags (assoc "ALLTAGS" headline-alist))
+             (entry-tags (when entry-tags (delete "" (split-string (cdr entry-tags) ":"))))
              (creation-date (cdr (assoc "CREATION-DATE" headline-alist)))
-             (modification-date (cdr (assoc "MODIFICATION-DATE" headline-alist))))
-        (setq reverse-index (concat index "- [["headline-name"]["headline-name"]]\n"))
-        (setq index (concat "- [["headline-name"]["headline-name"]]\n" index))
-        (setq index-with-dates (concat "- [["headline-name"]["headline-name"]]"
+             (modification-date (cdr (assoc "MODIFICATION-DATE" headline-alist)))
+             (summary (string-trim (cdr (assoc "SUMMARY" headline-alist))))
+             (index-entry (concat "- [["headline-name"]["headline-name"]]\n"))
+             (index-entry-with-date (concat "- @@html:<b>@@[["headline-name"]["headline-name"]]@@html:</b>@@"
                                        "@@html:<span class=\"page-date\">@@"
                                        " (" creation-date", updated " modification-date ")"
-                                       "@@html:</span>@@" "\n" 
-                                       index-with-dates))))
-    (list (cons "INDEX" index) (cons "REVERSE-INDEX" reverse-index)  (cons "INDEX-WITH-DATES" index-with-dates))))
+                                       "@@html:</span>@@" "\n" ))
+             (index-entry-with-summary 
+              (concat  index-entry-with-date 
+                       (unless (= (length summary) 0) 
+                         (concat "   @@html:<br>@@" summary "\n")))))
+        
+        (setq index (concat index index-entry))
+        (setq reverse-index (concat index-entry reverse-index))
+        (setq index-with-dates (concat  index-with-dates index-entry-with-date))
+        (setq index-with-summaries (concat  index-with-summaries index-entry-with-summary))
+
+        (dolist (tag entry-tags)
+          (if (not (member tag tags))
+              (setq tags (cons tag tags)))
+          (dolist (suffix '("" "-reverse" "-with-dates" "-with-summaries"))
+            ;; Initialize tags lists
+            (let ((tag-index-name (upcase (concat tag suffix))))
+              (unless (assoc tag tags-indexes) 
+                (setq tags-indexes (cons `(,tag-index-name . "")  tags-indexes)))))
+
+          ;;Add tag indexes to list
+          (let* ((tag (upcase tag))
+                (tag-reverse (upcase (concat tag "-reverse")))
+                (tag-with-dates (upcase (concat tag "-with-dates")))
+                (tag-with-summaries (upcase (concat tag "-with-summaries")))
+                (tag-assoc (assoc tag tags-indexes))
+                (tag-assoc-reverse (assoc tag-reverse tags-indexes))
+                (tag-assoc-with-dates (assoc tag-with-dates tags-indexes))
+                (tag-assoc-with-summaries (assoc tag-with-summaries tags-indexes))
+                (tag-index (cdr tag-assoc))
+                (tag-index-reverse (cdr tag-assoc-reverse))
+                (tag-index-with-dates (cdr tag-assoc-with-dates))
+                (tag-index-with-summaries (cdr tag-assoc-with-summaries)))
+
+            (setf (cdr tag-assoc) (concat tag-index index-entry))
+            (setf (cdr tag-assoc-reverse) (concat index-entry tag-index-reverse ))
+            (setf (cdr tag-assoc-with-dates) (concat tag-index-with-dates index-entry-with-date))
+            (setf (cdr tag-assoc-with-summaries) (concat tag-index-with-summaries index-entry-with-summary))))))
+
+    
+    (append 
+     (list (cons "INDEX" index) (cons "INDEX-REVERSE" reverse-index)  (cons "INDEX-WITH-DATES" index-with-dates) (cons "INDEX-WITH-SUMMARIES" index-with-summaries))
+     tags-indexes)))
+
 ;;END OF NON AST (non org-element) SESSION
 
 
@@ -333,6 +457,9 @@ Where match is a tag or -tag or combination of them."
   (when (string= (org-element-property :type link) "file")
     (let* ((path (org-element-property :path link))
            (link-copy (org-element-copy link))
+           (extension (file-name-extension path))
+           (img-extensions '("jpg" "tiff" "png" "bmp"))
+           (link-description (org-element-contents link))
            ;;Removes ../ from the releative path of the file to force it to be moved to a subfolder
            ;;of the current dir. This causes some file conflits in edge cases
            ;;e.g: ../images and ../../images will map to the same place. This should be rare in normal usage
@@ -342,7 +469,9 @@ Where match is a tag or -tag or combination of them."
            (new-hard-link-directory (file-name-directory new-hard-link-path)))
       
       ;;Fix the AST
-      (apply #'org-element-adopt-elements link-copy (org-element-contents link))
+      ;;If image, remove description so it will become a real image instead of a link
+      (unless (or (member extension img-extensions))
+        (apply #'org-element-adopt-elements link-copy link-description))
       (org-element-put-property link-copy :path new-relative-path)
       (org-element-set-element link  link-copy)
       
@@ -364,8 +493,8 @@ Where match is a tag or -tag or combination of them."
             (next (nth 2 temp-list))
             (headline (gethash headline-name headlines-hash nil))
             (new-properties 
-             (list (cons "PREVIOUS" previous)
-                   (cons "NEXT" next)))
+             (list (cons "PREVIOUS" (or next "index"))
+                   (cons "NEXT" (or previous "index"))))
             (headline (append headline new-properties))) ;; In reverse order, to allow headline properties to shadow this.
         (puthash headline-name headline headlines-hash))
         (setq temp-list (cdr temp-list))))
@@ -385,12 +514,12 @@ Where match is a tag or -tag or combination of them."
       text)))
 
 
-
-
 #+END_SRC
 
 #+RESULTS:
 : org-export-head--escape
+
+
 
 
 * Includes :noexport:
@@ -400,14 +529,14 @@ Creates a hard link to org.css in the export directory.
 * Menu :noexport:header:
 #+begin_head
 #+begin_title
-[[Index][Ivan @ Home]]
+[[index][Ivan @ Home]]
 #+end_title
 #+begin_catch-phrase
 Excelsior!
 #+end_catch-phrase
 
 #+begin_menu
-- [[Index][home]]
+- [[index][home]]
 - [[Foo][Foo!!]]
 - [[Foo Bar][Foo Bar!!]]
 - [[Broken][Should say Broken link]]
@@ -419,16 +548,61 @@ Excelsior!
 {{{title}}} @@comment: This is the title of the headline @@
 @@html: </h1>@@
 
-#+TOC: headlines 2
+@@html:<span class=page-date> <small>@@
+###CREATION-DATE###, updated ###MODIFICATION-DATE### [[###NEXT###][next]] - [[###PREVIOUS###][previous]]
+@@html:</small> </span> @@
 
-* Index 
+* Footer :noexport:footer:
+
+#+BEGIN_EXPORT html
+</br>
+<div class="comments">
+<div id="disqus_thread"></div>
+<script type="text/javascript">
+/* * * CONFIGURATION VARIABLES: EDIT BEFORE PASTING INTO YOUR WEBPAGE * * */
+    var disqus_shortname = 'ivanaf'; // Required - Replace '<example>' with your forum shortname
+    /* * * DON'T EDIT BELOW THIS LINE * * */
+    var showComments = function() {
+    var button = document.getElementById('comment-button')
+        button.style.display = 'none'
+        var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+        dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+        (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+        };
+    </script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<button id="comment-button" onclick="showComments()">Show comments</button>
+</div>
+#+END_EXPORT
+* index :reexport:
+  :PROPERTIES:
+  :CREATION-DATE: 2019-05-20
+  :MODIFICATION-DATE: 2019-05-20
+  :HASH:     b7d823e215b3116422c8ee6ca572c72e
+  :PREVIOUS-HASH: b7d823e215b3116422c8ee6ca572c72e
+  :END:
 This is my index! It uses a macro
 
 ** Index is here!
 
 ###INDEX-WITH-DATES###
-   
-* Foo
+** Index with summary is here!
+
+###INDEX-WITH-SUMMARIES###
+** index from tags: foo tag
+
+###FOO###
+** tag with sumary as well
+###FOO-WITH-SUMMARIES###
+
+* Foo :foo:
+  :PROPERTIES:
+  :CREATION-DATE: 2019-05-20
+  :MODIFICATION-DATE: 2019-05-20
+  :HASH:     f8d31cece301defc1ac108b41c14dae2
+  :PREVIOUS-HASH: f8d31cece301defc1ac108b41c14dae2
+  :END:
+This is my short summary of foo.
 ** subheader 0
 SCHEDULED: <2018-08-31 Fri>
 
@@ -455,15 +629,108 @@ This is an example page that will be generated.
 #+END_SRC
 
 * Bar
-  
+  :PROPERTIES:
+  :CREATION-DATE: 2019-05-20
+  :MODIFICATION-DATE: 2019-05-20
+  :HASH:     db60568ce77aaf43b65c00a8c4aeb51a
+  :PREVIOUS-HASH: db60568ce77aaf43b65c00a8c4aeb51a
+  :END:
 Here we show that footnotes work [fn:1].
 
 They are pretty great! [fn:2]
 
-* Foo Bar
-  Nothing to see here
-(org-export-head)
-  ###previous###
+* Foo Bar :foo:
+  :PROPERTIES:
+  :CREATION-DATE: 2019-05-20
+  :MODIFICATION-DATE: 2019-05-20
+  :HASH:     a19829bc44e7f276d56a35c0d56602a1
+  :PREVIOUS-HASH: a19829bc44e7f276d56a35c0d56602a1
+  :END:
+  Nothing to see here just macro examples.
+
+
+  - example link to previous post: [[###PREVIOUS###]]
+  - created on ###CREATION-DATE###
+  - current hash ###HASH###
+  - current summary ###SUMMARY###
+
+
+* Basic stuff from orgmode itself:
+  :PROPERTIES:
+  :CREATION-DATE: 2019-05-20
+  :MODIFICATION-DATE: 2019-05-20
+  :HASH:     5be0256e4e5b7b91aa03b731f1a54f2f
+  :PREVIOUS-HASH: 5be0256e4e5b7b91aa03b731f1a54f2f
+  :END:
+Just some examples on how you can use orgmode on your blog.
+
+table:
+| dsdds | dsdsd |
+|       |       |
+|    ss | ss    |
+
+$LATEX$ 
+
+At the moment if you generate an image using code, it must be in an \/extension\/ folder. Other images can be anywhere and they will be properly moved.
+
+Some tikz:
+#+HEADER: :file ./svg/example.svg 
+#+HEADER: :results output raw :headers '("\\usepackage{tikz}")
+#+HEADER: :fit yes :exports both
+#+BEGIN_src latex
+\begin{tikzpicture}
+\draw[->] (-3,0) -- (-2,0) arc[radius=0.5cm,start angle=-180,end angle=0] (-1,0) -- (1,0) arc[radius=0.5cm,start angle=180,end angle=0] (2,0) -- (3,0);
+\filldraw (-1.5,0) circle[radius=1mm];
+\filldraw (1.5,0) circle[radius=1mm];
+\end{tikzpicture}
+#+END_SRC
+
+#+RESULTS:
+[[file:./example.svg]]
+
+some code:
+
+#+NAME: cool_name
+#+BEGIN_SRC python :results file :exports both
+import matplotlib, numpy
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+fig=plt.figure(figsize=(4,2))
+x=numpy.linspace(-15,15)
+plt.plot(numpy.sin(x)/x)
+fig.tight_layout()
+plt.savefig('./png/python-matplot-fig.png')
+return './png/python-matplot-fig.png' # return filename to org-mode
+#+END_SRC
+
+#+RESULTS: cool_name
+[[file:./python-matplot-fig.png]]
+
+#+BEGIN_SRC dot :file ./png/dot_success.png :cmdline -Kdot -Tpng  :exports both
+  digraph {
+  // graph from left to right
+  rankdir=LR;
+  splines=true;
+  node [shape=box];
+ 
+  id [label="Install Graphviz"]
+  conf [label="Configure org-babel"]
+  dot [label="DOT in org-mode"]
+ 
+  id -> conf [label="0.2", weight=1]
+  conf -> dot[color=red, penwidth=3.0]
+  id -> dot [label="0.1", weight=2]  
+  dot -> "Profit"
+  id -> "Profit"  [label="0.2", weight=3]
+  dot -> "Success" [style=dotted]
+  {rank=same; conf,dot}  
+}
+#+END_SRC
+
+#+ATTR_ORG: :width 900
+#+RESULTS:
+[[file:./dot_success.png]]
+
 * Footnotes :noexport:
 
 [fn:2] My second foot note!
