@@ -5,4 +5,4 @@ For more features (not necessarily better features), please check my personal bl
 
 It contains features such as a footer (for comments), and previous and next links for the blog posts, as well as support for making indexes based on the tags.
 
-The most updated version will always be the one in my blog, since I've stopped updating this after the minimum example worked. See it on https://github.com/itf/itf.github.io/tree/source
+The most updated version will always be the one in my blog, since I don't often update this version. See it on https://github.com/itf/itf.github.io/tree/source
