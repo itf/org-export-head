@@ -551,7 +551,7 @@ Excelsior!
 @@html:<span class=page-date> <small>@@
 ###CREATION-DATE###, updated ###MODIFICATION-DATE### [[###NEXT###][next]] - [[###PREVIOUS###][previous]]
 @@html:</small> </span> @@
-
+#+TOC: headlines 2
 * Footer :noexport:footer:
 
 #+BEGIN_EXPORT html
