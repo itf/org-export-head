@@ -407,7 +407,7 @@ Where match is a tag or -tag or combination of them."
           (dolist (suffix '("" "-reverse" "-with-dates" "-with-summaries"))
             ;; Initialize tags lists
             (let ((tag-index-name (upcase (concat tag suffix))))
-              (unless (assoc tag tags-indexes) 
+              (unless (assoc tag-index-name tags-indexes) 
                 (setq tags-indexes (cons `(,tag-index-name . "")  tags-indexes)))))
 
           ;;Add tag indexes to list
